@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/sirt_logo.dart';
 import '../app_colors.dart';
 import '../services/profile_service.dart';
+import '../services/citizen_request_service.dart';
 import 'citizen_polling_screen.dart';
 import 'citizen_inventory_screen.dart';
 import 'citizen_service_requests_screen.dart';
@@ -22,6 +23,7 @@ class CitizenHomeScreen extends StatefulWidget {
 class _CitizenHomeScreenState extends State<CitizenHomeScreen> {
   int _selectedTab = 0;
   late final Stream<List<DutySchedule>> _dutyScheduleStream;
+  late final Stream<List<CitizenRequest>> _citizenRequestsStream;
   String? _profilePhotoUrl;
   bool _uploadingProfilePhoto = false;
   StreamSubscription<String?>? _profilePhotoSubscription;
@@ -31,10 +33,13 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen> {
     super.initState();
     dashboardNavigationSignal.addListener(_goToDashboard);
     _dutyScheduleStream = DutyScheduleService.watchAll();
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    _citizenRequestsStream = userId == null
+        ? Stream<List<CitizenRequest>>.value(const [])
+        : CitizenRequestService.watchMine(userId);
     _profilePhotoUrl = Supabase.instance.client.auth.currentUser
         ?.userMetadata?['avatar_url']
         ?.toString();
-    final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId != null) {
       _profilePhotoSubscription = ProfileService.watchMyAvatar(userId).listen(
         (photoUrl) {
@@ -189,13 +194,7 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen> {
                     fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
-              const _SummaryCard(
-                icon: Icons.priority_high_rounded,
-                iconColor: Color(0xFFEA9B34),
-                iconBackground: Color(0xFFFFF1D9),
-                title: '1 surat menunggu diproses',
-                subtitle: 'Lihat status pengajuan',
-              ),
+              _buildPendingLetterSummary(),
               const SizedBox(height: 8),
               const _SummaryCard(
                 icon: Icons.access_time,
@@ -226,6 +225,36 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen> {
                   ),
                 ),
             ],
+          );
+        },
+      );
+
+  Widget _buildPendingLetterSummary() => StreamBuilder<List<CitizenRequest>>(
+        stream: _citizenRequestsStream,
+        builder: (context, snapshot) {
+          final requests = snapshot.data;
+          final pendingCount = requests
+                  ?.where((request) =>
+                      request.kind == 'letter' && request.status == 'pending')
+                  .length ??
+              0;
+          final title = snapshot.hasError
+              ? 'Status surat belum tersedia'
+              : !snapshot.hasData
+                  ? 'Memuat status surat…'
+                  : '$pendingCount surat menunggu diproses';
+
+          return _SummaryCard(
+            icon: snapshot.hasError
+                ? Icons.sync_problem_outlined
+                : Icons.priority_high_rounded,
+            iconColor: const Color(0xFFEA9B34),
+            iconBackground: const Color(0xFFFFF1D9),
+            title: title,
+            subtitle: snapshot.hasError
+                ? 'Status pengajuan tidak dapat dimuat'
+                : 'Lihat status pengajuan',
+            onTap: _openCitizenRequests,
           );
         },
       );
@@ -749,6 +778,7 @@ class _SummaryCard extends StatelessWidget {
   final Color iconBackground;
   final String title;
   final String subtitle;
+  final VoidCallback? onTap;
 
   const _SummaryCard({
     required this.icon,
@@ -756,14 +786,21 @@ class _SummaryCard extends StatelessWidget {
     required this.iconBackground,
     required this.title,
     required this.subtitle,
+    this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
         constraints: const BoxConstraints(minHeight: 50),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Colors.transparent,
           border: Border.all(color: appBorder),
           borderRadius: BorderRadius.circular(14),
         ),
@@ -796,6 +833,8 @@ class _SummaryCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+          ),
         ),
       );
 }
